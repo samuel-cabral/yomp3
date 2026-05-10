@@ -12,9 +12,8 @@ enum Preferences {
             if let path = UserDefaults.standard.string(forKey: PreferencesKey.outputDirectory) {
                 return URL(fileURLWithPath: path)
             }
-            let music = FileManager.default.urls(for: .musicDirectory, in: .userDomainMask).first
-                ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Music")
-            return music.appendingPathComponent("yomp3")
+            return FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+                ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Downloads")
         }
         set {
             UserDefaults.standard.set(newValue.path, forKey: PreferencesKey.outputDirectory)
