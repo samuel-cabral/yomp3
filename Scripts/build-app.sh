@@ -2,7 +2,7 @@
 # Build YoMP3.app bundle from SwiftPM output.
 # Required because `swift run yomp3` does not present a SwiftUI window
 # reliably in macOS without a proper .app bundle (no activation policy, no dock icon).
-# Worker 8 will enhance this (universal binary, DMG packaging).
+# Worker 8 enhanced: universal binary with fallback, codesign verification.
 
 set -euo pipefail
 
@@ -12,10 +12,17 @@ APP_NAME="YoMP3"
 APP_DIR="build/${APP_NAME}.app"
 EXEC_NAME="yomp3"
 
-echo "==> swift build -c release"
-swift build -c release
+echo "==> Attempting universal binary build (arm64 + x86_64)"
+if swift build -c release --arch arm64 --arch x86_64 2>&1; then
+    BIN_PATH="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/${EXEC_NAME}"
+    echo "==> Universal binary build succeeded"
+else
+    echo "==> Universal binary build failed (likely CommandLineTools-only environment); falling back to native arch"
+    swift build -c release
+    BIN_PATH="$(swift build -c release --show-bin-path)/${EXEC_NAME}"
+    echo "==> Native arch build succeeded"
+fi
 
-BIN_PATH="$(swift build -c release --show-bin-path)/${EXEC_NAME}"
 if [ ! -x "$BIN_PATH" ]; then
     echo "Binary not found at $BIN_PATH" >&2
     exit 1
@@ -30,5 +37,8 @@ cp Resources/Info.plist "${APP_DIR}/Contents/Info.plist"
 
 echo "==> Ad-hoc codesign"
 codesign --sign - --force --deep --options runtime "$APP_DIR" 2>&1 | tail -3
+
+echo "==> Verifying codesign"
+codesign --verify --verbose "$APP_DIR" 2>&1 | tail -3
 
 echo "==> Done: ${APP_DIR}"
