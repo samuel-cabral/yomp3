@@ -70,7 +70,7 @@ struct YtDlpRunner {
                     let t = line.trimmingCharacters(in: .whitespaces)
                     if t.hasPrefix("PROGRESS:") {
                         let pctStr = t.dropFirst("PROGRESS:".count).trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "%", with: "")
-                        if let pct = Double(pctStr) { continuation.yield(.progress(pct / 100.0)) }
+                        if let pct = Double(pctStr) { continuation.yield(.progress(pct / 100.0)) } else { Log.runner.debug("progress parse failed: \(t, privacy: .public)") }
                     } else if t.hasPrefix("DONE:") {
                         let path = String(t.dropFirst("DONE:".count))
                         continuation.yield(.done(URL(fileURLWithPath: path)))

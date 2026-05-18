@@ -43,12 +43,13 @@ final class DownloadQueue: ObservableObject {
             var loaded = try JSONDecoder().decode([DownloadItem].self, from: data)
             for idx in loaded.indices {
                 if case .downloading = loaded[idx].status {
+                    Log.queue.warning("recovered downloading item \(loaded[idx].id, privacy: .public) as queued (crash recovery)")
                     loaded[idx].status = .queued
                 }
             }
             items = loaded
         } catch {
-            print("[DownloadQueue] load error: \(error)")
+            Log.queue.error("load error: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -71,7 +72,7 @@ final class DownloadQueue: ObservableObject {
             let data = try JSONEncoder().encode(items)
             try data.write(to: persistenceURL, options: .atomic)
         } catch {
-            print("[DownloadQueue] persist error: \(error)")
+            Log.queue.error("persist error: \(error.localizedDescription, privacy: .public)")
         }
     }
 }
