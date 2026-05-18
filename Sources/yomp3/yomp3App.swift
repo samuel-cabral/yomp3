@@ -22,5 +22,11 @@ struct YoMP3App: App {
                 .onAppear { orchestrator.start() }
         }
         .windowResizability(.contentSize)
+
+        Settings {
+            SettingsView()
+                .environmentObject(queue)
+                .environmentObject(orchestrator)
+        }
     }
 }
