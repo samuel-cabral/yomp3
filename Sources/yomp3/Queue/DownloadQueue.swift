@@ -61,18 +61,28 @@ final class DownloadQueue: ObservableObject {
             } catch {
                 return
             }
-            persist()
+            await persist()
         }
     }
 
-    private func persist() {
+    private func persist() async {
         do {
             let dir = persistenceURL.deletingLastPathComponent()
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            if !FileManager.default.isWritableFile(atPath: dir.path) {
+                Log.queue.error("persistence directory not writable: \(dir.path, privacy: .public)")
+                // Continue anyway — write may still succeed, but at least we logged the suspicion.
+            }
             let data = try JSONEncoder().encode(items)
-            try data.write(to: persistenceURL, options: .atomic)
+            do {
+                try data.write(to: persistenceURL, options: .atomic)
+            } catch {
+                Log.queue.warning("first write attempt failed, retrying once: \(error.localizedDescription, privacy: .public)")
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                try data.write(to: persistenceURL, options: .atomic)
+            }
         } catch {
-            Log.queue.error("persist error: \(error.localizedDescription, privacy: .public)")
+            Log.queue.error("persist failed for \(self.persistenceURL.path, privacy: .public) (items: \(self.items.count)): \(String(describing: error), privacy: .public)")
         }
     }
 }
