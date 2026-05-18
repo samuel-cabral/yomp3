@@ -1,7 +1,7 @@
 import Foundation
 
 enum DownloadEvent {
-    case progress(Double)
+    case progress(percent: Double, speed: String?, eta: String?, totalBytes: String?)
     case filename(URL)
     case done(URL)
 }
@@ -9,10 +9,19 @@ enum DownloadEvent {
 struct YtDlpRunner {
     let toolchain: Toolchain.Type
 
-    func download(_ url: URL, into outputDir: URL) -> AsyncThrowingStream<DownloadEvent, Error> {
+    func download(
+        _ url: URL,
+        into outputDir: URL,
+        format: AudioFormat,
+        template: String
+    ) -> AsyncThrowingStream<DownloadEvent, Error> {
         AsyncThrowingStream { continuation in
             guard let ytDlpURL = toolchain.ytDlpPath() else {
                 continuation.finish(throwing: AppError.toolchainMissing("yt-dlp not found"))
+                return
+            }
+            if format.requiresFFmpeg, toolchain.ffmpegPath() == nil {
+                continuation.finish(throwing: AppError.toolchainMissing("ffmpeg required for \(format.rawValue) output — install with: brew install ffmpeg"))
                 return
             }
             do {
@@ -24,16 +33,28 @@ struct YtDlpRunner {
 
             let process = Process()
             process.executableURL = ytDlpURL
-            process.arguments = [
-                "-f", "bestaudio[ext=m4a]/bestaudio",
+
+            var args: [String] = []
+            switch format {
+            case .original:
+                args.append(contentsOf: ["-f", "bestaudio[ext=m4a]/bestaudio"])
+            case .m4a:
+                args.append(contentsOf: ["-f", "bestaudio", "-x", "--audio-format", "m4a"])
+            case .mp3:
+                args.append(contentsOf: ["-f", "bestaudio", "-x", "--audio-format", "mp3", "--audio-quality", "0"])
+            case .wav:
+                args.append(contentsOf: ["-f", "bestaudio", "-x", "--audio-format", "wav"])
+            }
+            args.append(contentsOf: [
                 "--no-playlist",
                 "--embed-metadata",
                 "--newline",
-                "--progress-template", "PROGRESS:%(progress._percent_str)s",
+                "--progress-template", "PROGRESS:%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s|%(progress._total_bytes_str)s",
                 "--print", "after_move:DONE:%(filepath)s",
-                "-o", "\(outputDir.path)/%(title)s.%(ext)s",
+                "-o", "\(outputDir.path)/\(template).%(ext)s",
                 url.absoluteString
-            ]
+            ])
+            process.arguments = args
 
             let stdoutPipe = Pipe()
             let stderrPipe = Pipe()
@@ -69,8 +90,21 @@ struct YtDlpRunner {
                 for line in lines {
                     let t = line.trimmingCharacters(in: .whitespaces)
                     if t.hasPrefix("PROGRESS:") {
-                        let pctStr = t.dropFirst("PROGRESS:".count).trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "%", with: "")
-                        if let pct = Double(pctStr) { continuation.yield(.progress(pct / 100.0)) } else { Log.runner.debug("progress parse failed: \(t, privacy: .public)") }
+                        let payload = String(t.dropFirst("PROGRESS:".count))
+                        let fields = payload
+                            .split(separator: "|", omittingEmptySubsequences: false)
+                            .map { $0.trimmingCharacters(in: .whitespaces) }
+                        let pctStr = (fields.first ?? "")
+                            .replacingOccurrences(of: "%", with: "")
+                            .trimmingCharacters(in: .whitespaces)
+                        guard let pct = Double(pctStr) else {
+                            Log.runner.debug("progress parse failed: \(t, privacy: .public)")
+                            continue
+                        }
+                        let speed = fields.count > 1 ? Self.normalizeField(fields[1]) : nil
+                        let eta = fields.count > 2 ? Self.normalizeField(fields[2]) : nil
+                        let totalBytes = fields.count > 3 ? Self.normalizeField(fields[3]) : nil
+                        continuation.yield(.progress(percent: pct / 100.0, speed: speed, eta: eta, totalBytes: totalBytes))
                     } else if t.hasPrefix("DONE:") {
                         let path = String(t.dropFirst("DONE:".count))
                         continuation.yield(.done(URL(fileURLWithPath: path)))
@@ -84,5 +118,10 @@ struct YtDlpRunner {
                 continuation.finish(throwing: AppError.downloadFailed(error.localizedDescription))
             }
         }
+    }
+
+    private static func normalizeField(_ s: String) -> String? {
+        guard !s.isEmpty, s != "NA", s != "N/A" else { return nil }
+        return s
     }
 }
