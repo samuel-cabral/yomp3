@@ -4,6 +4,7 @@ import SwiftUI
 struct DownloadRowView: View {
     let item: DownloadItem
     @EnvironmentObject private var queue: DownloadQueue
+    @EnvironmentObject private var orchestrator: DownloadOrchestrator
 
     var body: some View {
         HStack(spacing: 10) {
@@ -33,12 +34,18 @@ struct DownloadRowView: View {
             Text("Na fila")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-        case .downloading(let p):
+        case .downloading(let p, let speed, let eta, let totalBytes):
             VStack(alignment: .leading, spacing: 2) {
                 ProgressView(value: p, total: 1.0)
                 Text("\(Int(p * 100))%")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                let details = [speed, eta, totalBytes].compactMap { $0 }
+                if !details.isEmpty {
+                    Text(details.joined(separator: " · "))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         case .done(let fileURL):
             Text(fileURL.lastPathComponent)
@@ -56,8 +63,12 @@ struct DownloadRowView: View {
     @ViewBuilder
     private var actionButton: some View {
         switch item.status {
-        case .queued, .downloading:
+        case .queued:
             Button("Cancelar") { queue.remove(item.id) }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.red)
+        case .downloading:
+            Button("Cancelar") { orchestrator.cancel(item.id) }
                 .buttonStyle(.borderless)
                 .foregroundStyle(.red)
         case .done(let fileURL):

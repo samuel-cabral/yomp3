@@ -7,6 +7,8 @@ struct SettingsView: View {
     @State private var outputDirectoryPath: String = (Preferences.outputDirectory.path as NSString).abbreviatingWithTildeInPath
     @State private var maxParallel: Int = Preferences.maxParallelDownloads
     @State private var autoCleanup: Bool = Preferences.autoCleanupCompleted
+    @State private var audioFormat: AudioFormat = Preferences.audioFormat
+    @State private var fileNameTemplate: String = Preferences.fileNameTemplate
 
     var body: some View {
         VStack(spacing: 0) {
@@ -26,6 +28,24 @@ struct SettingsView: View {
                             Preferences.maxParallelDownloads = newValue
                         }
                 }
+                Section("Formato de saída") {
+                    Picker("Formato", selection: $audioFormat) {
+                        ForEach(AudioFormat.allCases) { format in
+                            Text(format.displayName).tag(format)
+                        }
+                    }
+                    .onChange(of: audioFormat) { _, newValue in
+                        Preferences.audioFormat = newValue
+                    }
+                    Picker("Padrão de nome", selection: $fileNameTemplate) {
+                        Text("Apenas título").tag("%(title)s")
+                        Text("Canal - Título").tag("%(uploader)s - %(title)s")
+                        Text("Pasta por playlist").tag("%(playlist)s/%(title)s")
+                    }
+                    .onChange(of: fileNameTemplate) { _, newValue in
+                        Preferences.fileNameTemplate = newValue
+                    }
+                }
                 Section("Geral") {
                     Toggle("Limpar completados automaticamente", isOn: $autoCleanup)
                         .onChange(of: autoCleanup) { _, newValue in
@@ -42,7 +62,7 @@ struct SettingsView: View {
                     .padding()
             }
         }
-        .frame(minWidth: 400, minHeight: 280)
+        .frame(minWidth: 400, minHeight: 320)
     }
 
     private func openFolderPicker() {
