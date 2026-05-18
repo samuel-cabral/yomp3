@@ -10,6 +10,8 @@
     <string>com.samuelcabral.yomp3</string>
     <key>CFBundleExecutable</key>
     <string>yomp3</string>
+    <key>CFBundleIconFile</key>
+    <string>Icon</string>
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>CFBundleShortVersionString</key>
