@@ -35,9 +35,11 @@ struct PlaylistResolver {
                         }
                         continuation.resume(returning: urls.isEmpty ? [url] : urls)
                     } else {
+                        Log.playlist.debug("no playlist entries; treating as single video")
                         continuation.resume(returning: [url])
                     }
                 } catch {
+                    Log.playlist.error("flat-playlist decode failed: \(error.localizedDescription, privacy: .public); falling back to single URL")
                     continuation.resume(returning: [url])
                 }
             }
