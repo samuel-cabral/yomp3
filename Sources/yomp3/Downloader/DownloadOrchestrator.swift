@@ -45,6 +45,7 @@ final class DownloadOrchestrator: ObservableObject {
 
             let id = item.id
             let sourceURL = item.sourceURL
+            let title = item.title
             let task = Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.queue.update(id) { $0.status = .downloading(progress: 0, speed: nil, eta: nil, totalBytes: nil) }
@@ -58,17 +59,25 @@ final class DownloadOrchestrator: ObservableObject {
                             self.queue.update(id) { $0.status = .downloading(progress: pct, speed: speed, eta: eta, totalBytes: total) }
                         case .done(let fileURL):
                             self.queue.update(id) { $0.status = .done(fileURL) }
+                            Task { await DownloadNotifier.notifySuccess(title: title, fileURL: fileURL) }
                         case .filename:
                             break
                         }
                     }
                 } catch {
+                    var didCancel = false
                     self.queue.update(id) { item in
                         // Preserve "cancelled" set by cancel(_:) — yt-dlp's
                         // non-zero exit from termination would otherwise
                         // overwrite it with stderr noise.
-                        if case .failed(let msg) = item.status, msg == "cancelled" { return }
+                        if case .failed(let msg) = item.status, msg == "cancelled" {
+                            didCancel = true
+                            return
+                        }
                         item.status = .failed(error.localizedDescription)
+                    }
+                    if !didCancel {
+                        Task { await DownloadNotifier.notifyFailure(title: title, errorMessage: error.localizedDescription) }
                     }
                 }
                 self.inflightTasks.removeValue(forKey: id)
