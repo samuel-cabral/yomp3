@@ -1,17 +1,39 @@
 import SwiftUI
 
 struct ContentView: View {
+    @State private var showSettings = false
+
     var body: some View {
-        NavigationSplitView {
+        NavigationStack {
             VStack(spacing: 0) {
                 URLInputView()
-                ToolchainBanner()
-                Spacer()
+                BackendBanner()
+                Divider()
+                DownloadListView()
             }
-            .frame(minWidth: 280)
-        } detail: {
-            DownloadListView()
-                .frame(minWidth: 480, minHeight: 360)
+            .navigationTitle("YoMP3")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showSettings = true
+                    } label: {
+                        Image(systemName: "gear")
+                    }
+                }
+            }
+            .sheet(isPresented: $showSettings) {
+                NavigationStack {
+                    SettingsView()
+                        .navigationTitle("Configurações")
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .topBarTrailing) {
+                                Button("Fechar") { showSettings = false }
+                            }
+                        }
+                }
+            }
         }
     }
 }
