@@ -1,7 +1,17 @@
 import SwiftUI
 
+class AppDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication,
+                     handleEventsForBackgroundURLSession identifier: String,
+                     completionHandler: @escaping () -> Void) {
+        guard identifier == BackgroundSession.identifier else { return }
+        BackgroundSession.backgroundSessionCompletionHandler = completionHandler
+    }
+}
+
 @main
 struct YoMP3App: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var queue: DownloadQueue
     @StateObject private var orchestrator: DownloadOrchestrator
     private let runner: YtDlpRunner
@@ -20,13 +30,6 @@ struct YoMP3App: App {
                 .environmentObject(queue)
                 .environmentObject(orchestrator)
                 .onAppear { orchestrator.start() }
-        }
-        .windowResizability(.contentSize)
-
-        Settings {
-            SettingsView()
-                .environmentObject(queue)
-                .environmentObject(orchestrator)
         }
     }
 }

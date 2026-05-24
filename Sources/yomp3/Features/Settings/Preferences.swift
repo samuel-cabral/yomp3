@@ -6,6 +6,7 @@ enum PreferencesKey {
     static let autoCleanupCompleted = "yomp3.autoCleanupCompleted"
     static let audioFormat = "yomp3.audioFormat"
     static let fileNameTemplate = "yomp3.fileNameTemplate"
+    static let backendURL = "yomp3.backendURL"
 }
 
 enum AudioFormat: String, CaseIterable, Identifiable {
@@ -31,8 +32,9 @@ enum Preferences {
             if let path = UserDefaults.standard.string(forKey: PreferencesKey.outputDirectory) {
                 return URL(fileURLWithPath: path)
             }
-            return FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
-                ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Downloads")
+            let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+                ?? FileManager.default.temporaryDirectory
+            return docs.appendingPathComponent("Downloads")
         }
         set {
             UserDefaults.standard.set(newValue.path, forKey: PreferencesKey.outputDirectory)
@@ -66,5 +68,10 @@ enum Preferences {
     static var fileNameTemplate: String {
         get { UserDefaults.standard.string(forKey: PreferencesKey.fileNameTemplate) ?? "%(title)s" }
         set { UserDefaults.standard.set(newValue, forKey: PreferencesKey.fileNameTemplate) }
+    }
+
+    static var backendURL: String? {
+        get { UserDefaults.standard.string(forKey: PreferencesKey.backendURL) }
+        set { UserDefaults.standard.set(newValue, forKey: PreferencesKey.backendURL) }
     }
 }

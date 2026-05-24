@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "yomp3",
-    platforms: [.macOS(.v14)],
+    platforms: [.iOS(.v17)],
     targets: [
         .executableTarget(
             name: "yomp3",
