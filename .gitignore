@@ -8,3 +8,4 @@ build/
 *.xcworkspace
 .vscode/
 .env
+.claude/
