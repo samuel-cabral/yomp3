@@ -16,112 +16,96 @@ struct YtDlpRunner {
         template: String
     ) -> AsyncThrowingStream<DownloadEvent, Error> {
         AsyncThrowingStream { continuation in
-            guard let ytDlpURL = toolchain.ytDlpPath() else {
-                continuation.finish(throwing: AppError.toolchainMissing("yt-dlp not found"))
+            guard let backendBase = toolchain.backendURL() else {
+                continuation.finish(throwing: AppError.toolchainMissing("Backend URL não configurada — defina nas Configurações"))
                 return
             }
-            if format.requiresFFmpeg, toolchain.ffmpegPath() == nil {
-                continuation.finish(throwing: AppError.toolchainMissing("ffmpeg required for \(format.rawValue) output — install with: brew install ffmpeg"))
-                return
-            }
+
             do {
                 try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
             } catch {
-                continuation.finish(throwing: AppError.downloadFailed("Cannot create output dir: \(error.localizedDescription)"))
+                continuation.finish(throwing: AppError.downloadFailed("Não foi possível criar diretório de saída: \(error.localizedDescription)"))
                 return
             }
 
-            let process = Process()
-            process.executableURL = ytDlpURL
-
-            var args: [String] = []
-            switch format {
-            case .original:
-                args.append(contentsOf: ["-f", "bestaudio[ext=m4a]/bestaudio"])
-            case .m4a:
-                args.append(contentsOf: ["-f", "bestaudio", "-x", "--audio-format", "m4a"])
-            case .mp3:
-                args.append(contentsOf: ["-f", "bestaudio", "-x", "--audio-format", "mp3", "--audio-quality", "0"])
-            case .wav:
-                args.append(contentsOf: ["-f", "bestaudio", "-x", "--audio-format", "wav"])
+            var components = URLComponents(url: backendBase.appendingPathComponent("api/download"), resolvingAgainstBaseURL: false)!
+            components.queryItems = [
+                URLQueryItem(name: "url", value: url.absoluteString),
+                URLQueryItem(name: "format", value: format.rawValue),
+                URLQueryItem(name: "template", value: template),
+            ]
+            guard let requestURL = components.url else {
+                continuation.finish(throwing: AppError.downloadFailed("URL de requisição inválida"))
+                return
             }
-            args.append(contentsOf: [
-                "--no-playlist",
-                "--embed-metadata",
-                "--newline",
-                "--progress-template", "PROGRESS:%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s|%(progress._total_bytes_str)s",
-                "--print", "after_move:DONE:%(filepath)s",
-                "-o", "\(outputDir.path)/\(template).%(ext)s",
-                url.absoluteString
-            ])
-            process.arguments = args
 
-            let stdoutPipe = Pipe()
-            let stderrPipe = Pipe()
-            process.standardOutput = stdoutPipe
-            process.standardError = stderrPipe
+            let task = BackgroundSession.session.downloadTask(with: requestURL)
 
-            continuation.onTermination = { _ in process.terminate() }
+            var progressObservation: NSKeyValueObservation? = task.progress.observe(\.fractionCompleted, options: [.new]) { progress, _ in
+                let total = progress.totalUnitCount > 0
+                    ? ByteCountFormatter.string(fromByteCount: progress.totalUnitCount, countStyle: .file)
+                    : nil
+                continuation.yield(.progress(
+                    percent: progress.fractionCompleted,
+                    speed: nil,
+                    eta: nil,
+                    totalBytes: total
+                ))
+            }
 
-            var stderrCollected = Data()
+            BackgroundSessionDelegate.shared.register(taskIdentifier: task.taskIdentifier) { tempURL, response, error in
+                progressObservation?.invalidate()
+                progressObservation = nil
 
-            process.terminationHandler = { proc in
-                stderrPipe.fileHandleForReading.readabilityHandler = nil
-                stdoutPipe.fileHandleForReading.readabilityHandler = nil
-                if proc.terminationStatus != 0 {
-                    let msg = String(data: stderrCollected, encoding: .utf8) ?? "yt-dlp failed"
-                    continuation.finish(throwing: AppError.downloadFailed(msg))
-                } else {
-                    continuation.finish()
+                if let error {
+                    if (error as NSError).code == NSURLErrorCancelled { return }
+                    continuation.finish(throwing: AppError.downloadFailed(error.localizedDescription))
+                    return
                 }
-            }
 
-            stderrPipe.fileHandleForReading.readabilityHandler = { h in
-                stderrCollected.append(h.availableData)
-            }
+                guard let tempURL,
+                      let http = response as? HTTPURLResponse else {
+                    continuation.finish(throwing: AppError.downloadFailed("Sem resposta do servidor"))
+                    return
+                }
 
-            var stdoutBuffer = ""
-            stdoutPipe.fileHandleForReading.readabilityHandler = { h in
-                let data = h.availableData
-                guard !data.isEmpty, let chunk = String(data: data, encoding: .utf8) else { return }
-                stdoutBuffer += chunk
-                var lines = stdoutBuffer.components(separatedBy: "\n")
-                stdoutBuffer = lines.removeLast()
-                for line in lines {
-                    let t = line.trimmingCharacters(in: .whitespaces)
-                    if t.hasPrefix("PROGRESS:") {
-                        let payload = String(t.dropFirst("PROGRESS:".count))
-                        let fields = payload
-                            .split(separator: "|", omittingEmptySubsequences: false)
-                            .map { $0.trimmingCharacters(in: .whitespaces) }
-                        let pctStr = (fields.first ?? "")
-                            .replacingOccurrences(of: "%", with: "")
-                            .trimmingCharacters(in: .whitespaces)
-                        guard let pct = Double(pctStr) else {
-                            Log.runner.debug("progress parse failed: \(t, privacy: .public)")
-                            continue
-                        }
-                        let speed = fields.count > 1 ? Self.normalizeField(fields[1]) : nil
-                        let eta = fields.count > 2 ? Self.normalizeField(fields[2]) : nil
-                        let totalBytes = fields.count > 3 ? Self.normalizeField(fields[3]) : nil
-                        continuation.yield(.progress(percent: pct / 100.0, speed: speed, eta: eta, totalBytes: totalBytes))
-                    } else if t.hasPrefix("DONE:") {
-                        let path = String(t.dropFirst("DONE:".count))
-                        continuation.yield(.done(URL(fileURLWithPath: path)))
+                guard http.statusCode == 200 else {
+                    continuation.finish(throwing: AppError.downloadFailed("Erro do servidor: HTTP \(http.statusCode)"))
+                    return
+                }
+
+                let filename = Self.filename(from: http) ?? "\(UUID().uuidString).m4a"
+                let destURL = outputDir.appendingPathComponent(filename)
+                do {
+                    if FileManager.default.fileExists(atPath: destURL.path) {
+                        try FileManager.default.removeItem(at: destURL)
                     }
+                    try FileManager.default.moveItem(at: tempURL, to: destURL)
+                    continuation.yield(.done(destURL))
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: AppError.downloadFailed("Falha ao salvar arquivo: \(error.localizedDescription)"))
                 }
             }
 
-            do {
-                try process.run()
-            } catch {
-                continuation.finish(throwing: AppError.downloadFailed(error.localizedDescription))
+            continuation.onTermination = { _ in
+                task.cancel()
+                BackgroundSessionDelegate.shared.unregister(taskIdentifier: task.taskIdentifier)
             }
+
+            task.resume()
         }
     }
 
-    private static func normalizeField(_ s: String) -> String? {
-        guard !s.isEmpty, s != "NA", s != "N/A" else { return nil }
-        return s
+    private static func filename(from response: HTTPURLResponse) -> String? {
+        guard let disposition = response.value(forHTTPHeaderField: "Content-Disposition") else { return nil }
+        for part in disposition.components(separatedBy: ";") {
+            let t = part.trimmingCharacters(in: .whitespaces)
+            if t.hasPrefix("filename=") {
+                return String(t.dropFirst("filename=".count))
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+            }
+        }
+        return nil
     }
 }

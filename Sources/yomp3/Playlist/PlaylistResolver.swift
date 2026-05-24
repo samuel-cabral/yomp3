@@ -2,60 +2,27 @@ import Foundation
 
 struct PlaylistResolver {
     func resolve(_ url: URL) async throws -> [URL] {
-        guard let ytDlpURL = Toolchain.ytDlpPath() else {
-            throw AppError.toolchainMissing("yt-dlp not found")
+        guard let backendBase = Toolchain.backendURL() else {
+            throw AppError.toolchainMissing("Backend URL não configurada")
         }
 
-        let process = Process()
-        process.executableURL = ytDlpURL
-        process.arguments = ["--flat-playlist", "--dump-single-json", "--no-warnings", url.absoluteString]
-
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
-
-        return try await withCheckedThrowingContinuation { continuation in
-            process.terminationHandler = { proc in
-                let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-                let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-
-                if proc.terminationStatus != 0 {
-                    let msg = String(data: stderrData, encoding: .utf8) ?? "yt-dlp failed"
-                    continuation.resume(throwing: AppError.playlistResolutionFailed(msg))
-                    return
-                }
-
-                do {
-                    let result = try JSONDecoder().decode(FlatPlaylistJSON.self, from: stdoutData)
-                    if let entries = result.entries, !entries.isEmpty {
-                        let urls = entries.compactMap { entry -> URL? in
-                            guard let id = entry.id, !id.isEmpty else { return nil }
-                            return URL(string: "https://www.youtube.com/watch?v=\(id)")
-                        }
-                        continuation.resume(returning: urls.isEmpty ? [url] : urls)
-                    } else {
-                        Log.playlist.debug("no playlist entries; treating as single video")
-                        continuation.resume(returning: [url])
-                    }
-                } catch {
-                    Log.playlist.error("flat-playlist decode failed: \(error.localizedDescription, privacy: .public); falling back to single URL")
-                    continuation.resume(returning: [url])
-                }
-            }
-            do {
-                try process.run()
-            } catch {
-                continuation.resume(throwing: AppError.playlistResolutionFailed(error.localizedDescription))
-            }
+        var components = URLComponents(url: backendBase.appendingPathComponent("api/playlist"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "url", value: url.absoluteString)]
+        guard let requestURL = components.url else {
+            throw AppError.playlistResolutionFailed("URL de requisição inválida")
         }
+
+        let (data, response) = try await URLSession.shared.data(from: requestURL)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw AppError.playlistResolutionFailed("Servidor retornou erro")
+        }
+
+        let result = try JSONDecoder().decode(PlaylistResponse.self, from: data)
+        let urls = result.urls.compactMap { URL(string: $0) }
+        return urls.isEmpty ? [url] : urls
     }
 }
 
-private struct FlatPlaylistJSON: Decodable {
-    let entries: [PlaylistEntry]?
-}
-
-private struct PlaylistEntry: Decodable {
-    let id: String?
+private struct PlaylistResponse: Decodable {
+    let urls: [String]
 }

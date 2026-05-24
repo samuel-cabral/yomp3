@@ -1,4 +1,3 @@
-import AppKit
 import SwiftUI
 
 struct DownloadRowView: View {
@@ -72,8 +71,8 @@ struct DownloadRowView: View {
                 .buttonStyle(.borderless)
                 .foregroundStyle(.red)
         case .done(let fileURL):
-            Button("Revelar") {
-                NSWorkspace.shared.activateFileViewerSelecting([fileURL])
+            ShareLink(item: fileURL) {
+                Image(systemName: "square.and.arrow.up")
             }
             .buttonStyle(.borderless)
         case .failed:

@@ -1,40 +1,43 @@
 import SwiftUI
 
-struct ToolchainBanner: View {
-    @State private var ytDlpFound: Bool = true
-    @State private var ffmpegFound: Bool = true
-    @State private var didLoad = false
+// Renamed to BackendBanner — checks if the configured backend is reachable.
+struct BackendBanner: View {
+    @State private var state: BannerState = .checking
+
+    enum BannerState { case checking, ok, notConfigured, unreachable }
 
     var body: some View {
         Group {
-            if didLoad && !(ytDlpFound && ffmpegFound) {
-                warningCard
-            } else {
+            switch state {
+            case .checking, .ok:
                 EmptyView()
+            case .notConfigured:
+                warningCard(
+                    message: "Backend não configurado. Defina a URL nas Configurações.",
+                    actionLabel: nil
+                )
+            case .unreachable:
+                warningCard(
+                    message: "Backend inacessível. Verifique a URL e a rede.",
+                    actionLabel: "Tentar novamente"
+                )
             }
         }
-        .task { reload() }
+        .task { await reload() }
     }
 
-    private var warningCard: some View {
+    private func warningCard(message: String, actionLabel: String?) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Faltam dependências")
-                .font(.headline)
-
-            Text(missingDescription)
+            Text(message)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-
-            (Text("Instale com ")
-                + Text("brew install yt-dlp ffmpeg").font(.system(.subheadline, design: .monospaced)))
-                .font(.subheadline)
-
-            Button("Verificar novamente") {
-                Toolchain.refresh()
-                reload()
+            if let actionLabel {
+                Button(actionLabel) {
+                    Task { await reload() }
+                }
+                .buttonStyle(.borderless)
+                .padding(.top, 2)
             }
-            .buttonStyle(.borderless)
-            .padding(.top, 2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
@@ -43,18 +46,12 @@ struct ToolchainBanner: View {
         .padding(.horizontal)
     }
 
-    private var missingDescription: String {
-        switch (ytDlpFound, ffmpegFound) {
-        case (false, false): return "Não foram encontrados: yt-dlp e ffmpeg."
-        case (false, true):  return "Não foi encontrado: yt-dlp."
-        case (true, false):  return "Não foi encontrado: ffmpeg."
-        case (true, true):   return ""
+    private func reload() async {
+        guard Preferences.backendURL?.isEmpty == false else {
+            state = .notConfigured
+            return
         }
-    }
-
-    private func reload() {
-        ytDlpFound = Toolchain.ytDlpPath() != nil
-        ffmpegFound = Toolchain.ffmpegPath() != nil
-        didLoad = true
+        state = .checking
+        state = await Toolchain.checkReachable() ? .ok : .unreachable
     }
 }
