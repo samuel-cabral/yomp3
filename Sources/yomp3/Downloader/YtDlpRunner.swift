@@ -39,18 +39,36 @@ struct YtDlpRunner {
                 return
             }
 
-            let session = URLSession.shared
-            let task = session.downloadTask(with: requestURL) { tempURL, response, error in
-                if let error = error {
+            let task = BackgroundSession.session.downloadTask(with: requestURL)
+
+            var progressObservation: NSKeyValueObservation? = task.progress.observe(\.fractionCompleted, options: [.new]) { progress, _ in
+                let total = progress.totalUnitCount > 0
+                    ? ByteCountFormatter.string(fromByteCount: progress.totalUnitCount, countStyle: .file)
+                    : nil
+                continuation.yield(.progress(
+                    percent: progress.fractionCompleted,
+                    speed: nil,
+                    eta: nil,
+                    totalBytes: total
+                ))
+            }
+
+            BackgroundSessionDelegate.shared.register(taskIdentifier: task.taskIdentifier) { tempURL, response, error in
+                progressObservation?.invalidate()
+                progressObservation = nil
+
+                if let error {
                     if (error as NSError).code == NSURLErrorCancelled { return }
                     continuation.finish(throwing: AppError.downloadFailed(error.localizedDescription))
                     return
                 }
+
                 guard let tempURL,
                       let http = response as? HTTPURLResponse else {
                     continuation.finish(throwing: AppError.downloadFailed("Sem resposta do servidor"))
                     return
                 }
+
                 guard http.statusCode == 200 else {
                     continuation.finish(throwing: AppError.downloadFailed("Erro do servidor: HTTP \(http.statusCode)"))
                     return
@@ -70,21 +88,9 @@ struct YtDlpRunner {
                 }
             }
 
-            let observation = task.progress.observe(\.fractionCompleted) { progress, _ in
-                let total = progress.totalUnitCount > 0
-                    ? ByteCountFormatter.string(fromByteCount: progress.totalUnitCount, countStyle: .file)
-                    : nil
-                continuation.yield(.progress(
-                    percent: progress.fractionCompleted,
-                    speed: nil,
-                    eta: nil,
-                    totalBytes: total
-                ))
-            }
-
             continuation.onTermination = { _ in
                 task.cancel()
-                observation.invalidate()
+                BackgroundSessionDelegate.shared.unregister(taskIdentifier: task.taskIdentifier)
             }
 
             task.resume()
