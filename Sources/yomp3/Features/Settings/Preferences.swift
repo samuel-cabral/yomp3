@@ -32,8 +32,9 @@ enum Preferences {
             if let path = UserDefaults.standard.string(forKey: PreferencesKey.outputDirectory) {
                 return URL(fileURLWithPath: path)
             }
-            return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-                .appendingPathComponent("Downloads")
+            let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+                ?? FileManager.default.temporaryDirectory
+            return docs.appendingPathComponent("Downloads")
         }
         set {
             UserDefaults.standard.set(newValue.path, forKey: PreferencesKey.outputDirectory)

@@ -55,6 +55,3 @@ struct BackendBanner: View {
         state = await Toolchain.checkReachable() ? .ok : .unreachable
     }
 }
-
-// Keep old name for any remaining references
-typealias ToolchainBanner = BackendBanner

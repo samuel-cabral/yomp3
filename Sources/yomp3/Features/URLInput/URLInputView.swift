@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct URLInputView: View {
     @EnvironmentObject private var queue: DownloadQueue
